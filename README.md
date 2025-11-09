@@ -24,13 +24,13 @@ It integrates **data cleaning**, **language model inference (via Ollama + Mistra
 ## 🧠 Workflow
 
 Raw Review Data (CSV)
-↓
+->
 Text Cleaning & Normalization
-↓
+->
 Mistral LLM via Ollama (Text Understanding / Sentiment)
-↓
+->
 Data Aggregation & Visualization
-↓
+->
 Insights Dashboard / Output CSV
 
 
