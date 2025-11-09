@@ -1,0 +1,192 @@
+
+
+```{r}
+# ----------------------------
+# 1. Load required libraries
+# ----------------------------
+library(ellmer)     # For LLM/Ollama
+library(textclean)  # For cleaning review text
+library(ggplot2)    # For visualization
+library(progress)   # For progress bar
+```
+
+
+```{r}
+# ----------------------------
+# 2. Import dataset
+# ----------------------------
+# Replace with your actual CSV path
+reviews <- read.csv("ecommerce_review.csv", stringsAsFactors = FALSE)
+
+# Print number of rows
+cat("Total reviews to process:", nrow(reviews), "\n")
+```
+
+
+```{r}
+# ----------------------------
+# 3. Preprocess the text
+# ----------------------------
+reviews$clean <- tolower(reviews$text)
+reviews$clean <- replace_contraction(reviews$clean)
+reviews$clean <- replace_emoji(reviews$clean)
+reviews$clean <- replace_non_ascii(reviews$clean)
+```
+
+
+```{r}
+# ----------------------------
+# 4. Connect to Ollama (Mistral)
+# ----------------------------
+mistral <- chat_ollama(model = "mistral")
+```
+
+
+```{r}
+library(jsonlite)
+
+run_sentiment_analysis <- function(reviews, output_file = "reviews_with_sentiment.csv", batch_size = 40) {
+  
+  # Function: classify a batch of reviews
+  batch_classify <- function(texts, ids) {
+    prompt <- paste(
+      "You are a sentiment classifier.",
+      "For each review below, output ONLY valid JSON as an array of objects.",
+      "Each object MUST have exactly two keys: 'id' and 'sentiment'.",
+      "The only allowed values for sentiment are: 'Positive', 'Negative', or 'Neutral'.",
+      "Do not include rating, comment, explanations, or anything else.",
+      "Do not summarize. Do not explain. Do not add percentages.",
+      "Respond ONLY with valid JSON. Nothing else.",
+      "\n\nReviews:\n",
+      paste0(ids, ". ", texts, collapse = "\n")
+    )
+    
+    resp <- mistral$chat(prompt)
+    
+    # Parse JSON safely
+    result <- tryCatch({
+      fromJSON(resp)
+    }, error = function(e) {
+      message("⚠️ JSON parse failed for ids ", paste(ids, collapse = ","), ". Assigning NA.")
+      data.frame(id = ids, sentiment = NA)
+    })
+    
+    return(result)
+  }
+  
+  n <- nrow(reviews)
+  
+  # Write CSV header if file doesn't exist
+  if (!file.exists(output_file)) {
+    write.csv(
+      cbind(reviews[0, ], sentiment = character()),  # empty frame with same structure
+      file = output_file,
+      row.names = FALSE,
+      quote = TRUE
+    )
+  }
+  
+  for (i in seq(1, n, by = batch_size)) {
+    batch_idx <- i:min(i + batch_size - 1, n)
+    batch_texts <- reviews$clean[batch_idx]
+    batch_ids <- batch_idx
+    
+    message("Processing reviews ", min(batch_idx), " to ", max(batch_idx), " of ", n)
+    
+    # Get sentiment classifications
+    res <- batch_classify(batch_texts, batch_ids)
+    
+    # Append sentiment to full rows of reviews
+    batch_out <- reviews[batch_idx, ]
+    batch_out$sentiment <- res$sentiment[match(batch_idx, res$id)]
+    
+    # Append to CSV
+    write.table(
+      batch_out,
+      file = output_file,
+      sep = ",",
+      col.names = FALSE,
+      row.names = FALSE,
+      append = TRUE,
+      quote = TRUE,
+      qmethod = "double"
+    )
+  }
+  
+  message("✅ Sentiment analysis complete! Results saved to ", output_file)
+}
+# Run batch sentiment analysis
+run_sentiment_analysis(reviews, output_file = "reviews_with_sentiment.csv", batch_size = 40)
+
+```
+
+```{r}
+reviews <- read.csv("reviews_with_sentiment.csv", stringsAsFactors = FALSE)
+```
+
+
+```{r}
+# ----------------------------
+# 6. Inspect results
+# ----------------------------
+cat("\nSentiment counts:\n")
+print(table(reviews$sentiment))
+```
+
+
+```{r}
+library(ggplot2)
+
+ggplot(reviews, aes(x = sentiment)) +
+  geom_bar(fill = "steelblue") +
+  theme_minimal() +
+  labs(
+    title = "Sentiment Distribution of Reviews",
+    x = "Sentiment",
+    y = "Number of Reviews"
+  )
+
+
+
+```
+
+
+```{r}
+ggplot(reviews, aes(x = factor(rating), fill = sentiment)) +
+  geom_bar(position = "fill") +  # "fill" = proportion, use "stack" for counts
+  theme_minimal() +
+  labs(
+    title = "Sentiment vs Rating",
+    x = "Rating (Stars)",
+    y = "Proportion of Sentiments"
+  ) +
+  scale_fill_manual(values = c("Positive" = "green", "Negative" = "red", "Neutral" = "gray"))
+
+```
+
+```{r}
+ggplot(reviews, aes(x = department, fill = sentiment)) +
+  geom_bar(position = "dodge") +
+  theme_minimal() +
+  labs(
+    title = "Sentiment by Department",
+    x = "Department",
+    y = "Number of Reviews"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+```{r}
+ggplot(reviews, aes(x = sentiment, y = age, fill = sentiment)) +
+  geom_boxplot(alpha = 0.6) +
+  theme_minimal() +
+  labs(
+    title = "Age Distribution by Sentiment",
+    x = "Sentiment",
+    y = "Age"
+  ) +
+  scale_fill_manual(values = c("Positive" = "green", "Negative" = "red", "Neutral" = "gray"))
+
+```
+
